@@ -1,0 +1,27 @@
+.navbar .navbar-inverse {
+    background-color: #1D94F2;
+}
+
+.navbar-inverse .navbar-nav>li>a.scrape:hover {
+    background: #4DB851;
+}
+
+.navbar-inverse .navbar-nav>li>a.scrape:active {
+    background: #F11C24;
+}
+
+.scrape-new {
+    cursor: pointer;
+}
+
+.panel.panel-default .panel-heading {
+    background-color: #1D94F2;
+}
+
+.panel.panel-default .panel-heading h3 {
+    color: white;
+}
+
+.panel {
+    box-shadow: 3px 3px 20px lightgray;
+}
