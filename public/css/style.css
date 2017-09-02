@@ -1,9 +1,14 @@
-.navbar .navbar-inverse {
-    background-color: #1D94F2;
+html {
+    position: relative;
+    min-height: 100%;
 }
 
 .navbar-inverse .navbar-nav>li>a.scrape:hover {
     background: #4DB851;
+}
+
+.navbar-inverse {
+    background-image: linear-gradient(to bottom,#1424E4 0,#222 100%);
 }
 
 .navbar-inverse .navbar-nav>li>a.scrape:active {

@@ -1,115 +1,206 @@
-var request = require('request');
-var cheerio = require('cheerio');
 var express = require('express');
-var path = require('path');
 var router = express.Router();
+var path = require('path');
+var request = require('request'); // for web-scraping
+var cheerio = require('cheerio'); // for web-scraping
+
+// Import the Comment and Article models
+var Note = require('../models/Note.js');
 var Article = require('../models/Article.js');
-var Notes = require('../models/Note.js');
 
-router.get('/', function(req, res) {
-  res.render('home');
-});
+// Index Page Render (first visit to the site)
+router.get('/', function (req, res){
 
-router.get('/saved', function(req, res) {
-  res.render('saved');
-});
-
-// router.get('/', function(req, res) {
-//   res.redirect('/scrape');
-// });
-
-router.get("/scrape", function(req, res) {
-    request("http://www.nytimes.com", function(error, response, html) {
-        var $ = cheerio.load(html);
-        var article = [];
-        $('h2.story-heading').each(function(i, element) {
-            var result = {};
-            result.title = $(this).children("a").text();
-            result.link = $(this).children("a").attr('href');
-            result.summary = $(this).children("p").text();
-            
-            var entry = new Article(result);
-            
-                  // Now, save that entry to the db
-                  entry.save(function(err, doc) {
-                    // Log any errors
-                    if (err) {
-                      console.log(err);
-                    }
-                    // Or log the doc
-                    else {
-                      console.log(doc);
-                    }
-        });
-res.send('scrape complete');
-        // res.redirect('/articles');
-    });
-});
+  // Scrape data
+  res.redirect('/scrape');
 
 });
 
-// This will get the articles we scraped from the mongoDB
-router.get("/articles", function(req, res) {
-    // Grab every doc in the Articles array
-    Article.find({}, function(err, doc) {
-      if (err) {
+
+// Articles Page Render
+router.get('/articles', function (req, res){
+
+  // Query MongoDB for all article entries (sort newest to top, assuming Ids increment)
+  Article.find().sort({_id: -1})
+
+    // But also populate all of the comments associated with the articles.
+    .populate('notes')
+
+    // Then, send them to the handlebars template to be rendered
+    .exec(function(err, doc){
+      // log any errors
+      if (err){
         console.log(err);
-      }
+      } 
+      // or send the doc to the browser as a json object
       else {
         var hbsObject = {articles: doc}
-        res.render('saved', hbsObject);
-      }     
-    });
-  });
-  
-  // Grab an article by it's ObjectId
-  router.get("/articles/:id", function(req, res) {
-    // Using the id passed in the id parameter, prepare a query that finds the matching one in our db...
-    Article.findOne({ "_id": req.params.id })
-    // ..and populate all of the notes associated with it
-    .populate("note")
-    // now, execute our query
-    .exec(function(error, doc) {
-      // Log any errors
-      if (error) {
-        console.log(error);
-      }
-      // Otherwise, send the doc to the browser as a json object
-      else {
-        res.json(doc);
+        res.render('index', hbsObject);
+        // res.json(hbsObject)
       }
     });
-  });
-  
-  
-  // Create a new note or replace an existing note
-  router.post("/articles/:id", function(req, res) {
-    // Create a new note and pass the req.body to the entry
-    var newNote = new Note(req.body);
-  
-    // And save the new note the db
-    newNote.save(function(error, doc) {
-      // Log any errors
-      if (error) {
-        console.log(error);
+
+});
+
+
+// Web Scrape Route
+router.get('/scrape', function(req, res) {
+
+  // First, grab the body of the html with request
+  request('http://www.theonion.com/', function(error, response, html) {
+
+    // Then, load html into cheerio and save it to $ for a shorthand selector
+    var $ = cheerio.load(html);
+
+    // This is an error handler for the Onion website only, they have duplicate articles for some reason...
+    var titlesArray = [];
+
+    // Now, grab every everything with a class of "inner" with each "article" tag
+    $('article .inner').each(function(i, element) {
+
+        // Create an empty result object
+        var result = {};
+
+        // Collect the Article Title (contained in the "h2" of the "header" of "this")
+        result.title = $(this).children('header').children('h2').text().trim() + ""; //convert to string for error handling later
+
+        // Collect the Article Link (contained within the "a" tag of the "h2" in the "header" of "this")
+        result.link = 'http://www.theonion.com' + $(this).children('header').children('h2').children('a').attr('href').trim();
+
+        // Collect the Article Summary (contained in the next "div" inside of "this")
+        result.summary = $(this).children('div').text().trim() + ""; //convert to string for error handling later
+      
+
+        // Error handling to ensure there are no empty scrapes
+        if(result.title !== "" &&  result.summary !== ""){
+
+          // BUT we must also check within each scrape since the Onion has duplicate articles...
+          // Due to async, moongoose will not save the articles fast enough for the duplicates within a scrape to be caught
+          if(titlesArray.indexOf(result.title) == -1){
+
+            // Push the saved item to our titlesArray to prevent duplicates thanks the the pesky Onion...
+            titlesArray.push(result.title);
+
+            // Only add the entry to the database if is not already there
+            Article.count({ title: result.title}, function (err, test){
+
+              // If the count is 0, then the entry is unique and should be saved
+              if(test == 0){
+
+                // Using the Article model, create a new entry (note that the "result" object has the exact same key-value pairs of the model)
+                var entry = new Article (result);
+
+                // Save the entry to MongoDB
+                entry.save(function(err, doc) {
+                  // log any errors
+                  if (err) {
+                    console.log(err);
+                  } 
+                  // or log the doc that was saved to the DB
+                  else {
+                    console.log(doc);
+                  }
+                });
+
+              }
+              // Log that scrape is working, just the content was already in the Database
+              else{
+                console.log('Redundant Database Content. Not saved to DB.')
+              }
+
+            });
+        }
+        // Log that scrape is working, just the content was missing parts
+        else{
+          console.log('Redundant Onion Content. Not Saved to DB.')
+        }
+
       }
-      // Otherwise
-      else {
-        // Use the article id to find and update it's note
-        Article.findOneAndUpdate({ "_id": req.params.id }, { "note": doc._id })
-        // Execute the above query
-        .exec(function(err, doc) {
-          // Log any errors
-          if (err) {
-            console.log(err);
-          }
-          else {
-            // Or send the document to the browser
-            res.redirect('saved');
-          }
-        });
+      // Log that scrape is working, just the content was missing parts
+      else{
+        console.log('Empty Content. Not Saved to DB.')
       }
+
     });
+
+    // Redirect to the Articles Page, done at the end of the request for proper scoping
+    res.redirect("/articles");
+
   });
+
+});
+
+
+// Add a Comment Route - **API**
+router.post('/add/note/:id', function (req, res){
+
+  // Collect article id
+  var articleId = req.params.id;
   
-  module.exports = router;
+  // Collect Author Name
+  var noteAuthor = req.body.name;
+
+  // Collect Comment Content
+  var noteContent = req.body.comment;
+
+  // "result" object has the exact same key-value pairs of the "Comment" model
+  var result = {
+    author: noteAuthor,
+    content: noteContent
+  };
+
+  // Using the Comment model, create a new comment entry
+  var entry = new Note (result);
+
+  // Save the entry to the database
+  entry.save(function(err, doc) {
+    // log any errors
+    if (err) {
+      console.log(err);
+    } 
+    // Or, relate the comment to the article
+    else {
+      // Push the new Comment to the list of comments in the article
+      Article.findOneAndUpdate({'_id': articleId}, {$push: {'notes':doc._id}}, {new: true})
+      // execute the above query
+      .exec(function(err, doc){
+        // log any errors
+        if (err){
+          console.log(err);
+        } else {
+          // Send Success Header
+          res.sendStatus(200);
+        }
+      });
+    }
+  });
+
+});
+
+
+
+
+// Delete a Comment Route
+router.post('/remove/note/:id', function (req, res){
+
+  // Collect comment id
+  var noteId = req.params.id;
+
+  // Find and Delete the Comment using the Id
+  Note.findByIdAndRemove(commentId, function (err, todo) {  
+    
+    if (err) {
+      console.log(err);
+    } 
+    else {
+      // Send Success Header
+      res.sendStatus(200);
+    }
+
+  });
+
+});
+
+
+// Export Router to Server.js
+module.exports = router;
